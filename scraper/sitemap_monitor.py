@@ -29,11 +29,24 @@ SITES = [
         "name": "Poki",
         "sitemap_url": "https://poki.com/en/sitemaps/games.xml",
         "game_url_prefix": "https://poki.com/en/g/",
+        "type": "sitemap",
     },
     {
         "name": "CrazyGames",
         "sitemap_url": "https://www.crazygames.com/sitemap",
         "game_url_prefix": "https://www.crazygames.com/game/",
+        "type": "sitemap",
+    },
+    {
+        "name": "Silvergames",
+        "scrape_url": "https://www.silvergames.com/en/new",
+        "base_url": "https://www.silvergames.com",
+        "game_url_prefix": "https://www.silvergames.com/en/",
+        "type": "scrape",
+        # 排除的非游戏路径
+        "exclude_paths": {"/en/new", "/en/popular", "/en/action", "/en/racing",
+                          "/en/shooting", "/en/sports", "/en/strategy", "/en/puzzle",
+                          "/en/iogames", "/en/my"},
     },
 ]
 
@@ -73,6 +86,32 @@ def extract_game_slug(url: str, prefix: str) -> str:
         slug = url[len(prefix):].rstrip("/")
         return slug
     return url
+
+
+def fetch_silvergames(site: dict) -> list[str]:
+    """爬取 Silvergames 新游戏页，提取游戏 URL"""
+    import re
+    try:
+        resp = requests.get(site["scrape_url"], headers=HEADERS, timeout=30)
+        resp.raise_for_status()
+        links = re.findall(r'href="(/en/[^"]+)"', resp.text)
+        exclude = site.get("exclude_paths", set())
+        game_urls = []
+        seen = set()
+        for path in links:
+            # 只保留像游戏页的路径（/en/xxx 且不在排除列表里，不含子路径分隔）
+            if path in exclude:
+                continue
+            if path.count("/") != 2:  # /en/game-name 只有2个斜杠
+                continue
+            full_url = site["base_url"] + path
+            if full_url not in seen:
+                seen.add(full_url)
+                game_urls.append(full_url)
+        return game_urls
+    except Exception as e:
+        print(f"[ERROR] 爬取 Silvergames 失败: {e}")
+        return []
 
 
 def is_game_url(url: str, site: dict) -> bool:
@@ -157,13 +196,17 @@ def run():
 
     for site in SITES:
         print(f"\n[INFO] 处理 {site['name']}...")
-        all_urls = fetch_sitemap(site["sitemap_url"])
 
-        # 只保留游戏 URL
-        game_urls = [
-            item["url"] for item in all_urls
-            if is_game_url(item["url"], site)
-        ]
+        if site.get("type") == "scrape":
+            # 爬取型（Silvergames）
+            game_urls = fetch_silvergames(site)
+        else:
+            # Sitemap 型（Poki / CrazyGames）
+            all_urls = fetch_sitemap(site["sitemap_url"])
+            game_urls = [
+                item["url"] for item in all_urls
+                if is_game_url(item["url"], site)
+            ]
         print(f"[INFO] {site['name']}: 共 {len(game_urls)} 个游戏 URL")
 
         # 对比上次
